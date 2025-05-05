@@ -1,0 +1,65 @@
+import pandas as pd
+import geopandas as gpd
+import folium
+from shapely.geometry import Point
+from sklearn.neighbors import KNeighborsRegressor
+import matplotlib.pyplot as plt
+import numpy as np
+
+# -----------------------------
+# Step 1: Load Noise Data
+# -----------------------------
+# Sample CSV format: latitude,longitude,noise_level_dB
+noise_df = pd.read_csv("noise_data.csv")  # replace with your file
+
+# Create GeoDataFrame
+geometry = [Point(xy) for xy in zip(noise_df['longitude'], noise_df['latitude'])]
+gdf = gpd.GeoDataFrame(noise_df, geometry=geometry)
+gdf.set_crs(epsg=4326, inplace=True)  # WGS 84
+
+# -----------------------------
+# Step 2: Display Basic Map
+# -----------------------------
+m = folium.Map(location=[gdf.latitude.mean(), gdf.longitude.mean()], zoom_start=13)
+for _, row in gdf.iterrows():
+    folium.CircleMarker(
+        location=(row.latitude, row.longitude),
+        radius=6,
+        popup=f"Noise: {row.noise_level_dB} dB",
+        color="red" if row.noise_level_dB > 70 else "green",
+        fill=True
+    ).add_to(m)
+
+m.save("noise_pollution_map.html")
+print("Basic noise pollution map saved as 'noise_pollution_map.html'")
+
+# -----------------------------
+# Step 3: Interpolation (KNN) for Mapping Noise Surface
+# -----------------------------
+# Create grid for predictions
+minx, miny, maxx, maxy = gdf.total_bounds
+xx, yy = np.meshgrid(np.linspace(minx, maxx, 100), np.linspace(miny, maxy, 100))
+grid_points = pd.DataFrame({'longitude': xx.ravel(), 'latitude': yy.ravel()})
+
+# Fit KNN model
+X = gdf[['longitude', 'latitude']]
+y = gdf['noise_level_dB']
+knn = KNeighborsRegressor(n_neighbors=5)
+knn.fit(X, y)
+
+# Predict on grid
+grid_points['noise_level_dB'] = knn.predict(grid_points[['longitude', 'latitude']])
+
+# -----------------------------
+# Step 4: Plot Heatmap
+# -----------------------------
+plt.figure(figsize=(10, 8))
+plt.tricontourf(grid_points['longitude'], grid_points['latitude'], grid_points['noise_level_dB'], levels=15, cmap='coolwarm')
+plt.colorbar(label='Noise Level (dB)')
+plt.scatter(gdf['longitude'], gdf['latitude'], c='black', s=10, label='Sensor Locations')
+plt.title('Noise Pollution Interpolation Map')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.legend()
+plt.savefig('noise_pollution_heatmap.png', dpi=300)
+plt.show()
